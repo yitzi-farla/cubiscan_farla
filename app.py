@@ -29,7 +29,7 @@ DB_URL = os.getenv("DATABASE_URL", "")
 TABLE_NAME = "measurements"
 
 # Command barcodes
-SUBMIT_TO_DB_CODE = "SUBMIT"
+SUBMIT_TO_DB_CODE = "SUBMITTODB"
 CLEAR_CODE        = "CLEARFROMSCREEN"
 UOM_UNIT_CODE     = "UNIT"
 UOM_PACK_CODE     = "PACK"
