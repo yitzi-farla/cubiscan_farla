@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-#
+#v2
 # Dimension Capture – Minimal, Beautiful, Resilient Kiosk
 # - Dark Spotify-ish UI
 # - JSON event logging
