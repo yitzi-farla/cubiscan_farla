@@ -878,7 +878,7 @@ class Uploader(threading.Thread):
 # ----------------------------
 # Fast CSV product catalogue + search helpers
 # ----------------------------
-TRADEPEG_EXPORT_PRODUCTS_URL = f"{TRADEPEG_API_BASE}/export/product/"
+TRADEPEG_EXPORT_PRODUCTS_URL = f"{TRADEPEG_API_BASE}/export/products"
 PRODUCT_CACHE_PATH = APP_DIR / "tradepeg_products.csv"
 PRODUCT_CACHE_REFRESH_SECONDS = 21600
 NEON = "#b6ff00"
@@ -1013,7 +1013,7 @@ class ProductCatalogCache:
             stale = (time.time() - chosen.stat().st_mtime) > PRODUCT_CACHE_REFRESH_SECONDS
         if force or not chosen or stale:
             if not TRADEPEG_API_KEY:
-                cache_progress("Product cache missing/stale/failed, but TRADEPEG_API_KEY is not set; cannot download /export/product/")
+                cache_progress("Product cache missing/stale/failed, but TRADEPEG_API_KEY is not set; cannot download /export/products")
                 if chosen and chosen.exists() and chosen.stat().st_size > 0:
                     return chosen
                 raise RuntimeError("TRADEPEG_API_KEY not set and no usable product cache exists")
