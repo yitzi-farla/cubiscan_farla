@@ -19,38 +19,39 @@ import psycopg2.extras
 import requests
 
 # ----------------------------
-# Configuration (env overrides)
+# Configuration
+# Only real secrets / credentials come from .env.
+# Operational constants stay in code so the Pi is harder to misconfigure.
 # ----------------------------
-PORT = os.getenv("DIMM_PORT", "/dev/cubiscan")
-BAUD = int(os.getenv("DIMM_BAUD", "9600"))
+PORT = "/dev/cubiscan"
+BAUD = 9600
 DB_URL = os.getenv("DATABASE_URL", "")
-TABLE_NAME = os.getenv("TABLE_NAME", "measurements")
+TABLE_NAME = "measurements"
 
 # Command barcodes
-SUBMIT_TO_DB_CODE = os.getenv("SUBMIT_CODE", os.getenv("SUBMIT_TO_DB_CODE", "SUBMIT"))
-CLEAR_CODE        = os.getenv("CLEAR_CODE", "CLEARFROMSCREEN")
-UOM_UNIT_CODE     = os.getenv("UOM_UNIT_CODE", "UNIT")
-UOM_PACK_CODE     = os.getenv("UOM_PACK_CODE", "PACK")
-UOM_CASE_CODE     = os.getenv("UOM_CASE_CODE", "CASE")
+SUBMIT_TO_DB_CODE = "SUBMIT"
+CLEAR_CODE        = "CLEARFROMSCREEN"
+UOM_UNIT_CODE     = "UNIT"
+UOM_PACK_CODE     = "PACK"
+UOM_CASE_CODE     = "CASE"
 
-# TradePeg
-TRADEPEG_TOKEN    = os.getenv("TRADEPEG_TOKEN", "")
-TRADEPEG_BASE_URL = os.getenv("TRADEPEG_BASE_URL", "https://api-prod.tradepeg.com")
+# TradePeg / Farla API
+TRADEPEG_API_BASE = os.getenv("TRADEPEG_API_BASE", "https://farlatradepegapi-production.up.railway.app").rstrip("/")
 TRADEPEG_API_KEY  = os.getenv("TRADEPEG_API_KEY", "")
-TRADEPEG_EXPORT_UOM_URL = os.getenv("TRADEPEG_EXPORT_UOM_URL", "https://farlatradepegapi-production.up.railway.app/export/uom")
-TRADEPEG_UOM_UPDATE_URL = os.getenv("TRADEPEG_UOM_UPDATE_URL", "https://farlatradepegapi-production.up.railway.app/update/uom")
-TRADEPEG_UOM_UPDATE_METHOD = os.getenv("TRADEPEG_UOM_UPDATE_METHOD", "POST").upper()
+TRADEPEG_EXPORT_UOM_URL = f"{TRADEPEG_API_BASE}/export/uom"
+TRADEPEG_UOM_UPDATE_URL = f"{TRADEPEG_API_BASE}/update/uom"
+TRADEPEG_UOM_UPDATE_METHOD = "POST"
 
 # Files
 SCRIPT_DIR = Path(__file__).resolve().parent
-APP_DIR  = Path(os.getenv("APP_DIR", SCRIPT_DIR))
-LOG_DIR  = Path(os.getenv("LOG_DIR", APP_DIR / "logs"))
+APP_DIR  = SCRIPT_DIR
+LOG_DIR  = APP_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 EVT_LOG  = LOG_DIR / "events.jsonl"          # append-only JSONL
 RAW_LOG  = LOG_DIR / "raw_device.jsonl"      # raw device frames (optional)
 POOL_PATH= LOG_DIR / "pending_pool.json"     # offline queue
-UOM_CACHE_PATH = Path(os.getenv("UOM_CACHE_PATH", APP_DIR / "tradepeg_uom.csv"))
-CACHE_DB_PATH = Path(os.getenv("CACHE_DB_PATH", APP_DIR / "tradepeg_cache.sqlite"))
+UOM_CACHE_PATH = APP_DIR / "tradepeg_uom.csv"
+CACHE_DB_PATH = APP_DIR / "tradepeg_cache.sqlite"
 
 # ----------------------------
 # Theming
@@ -808,22 +809,8 @@ class SerialReader(threading.Thread):
 # ----------------------------
 # TradePeg lookup
 # ----------------------------
-def tradepeg_lookup(barcode: str):
-    if not TRADEPEG_TOKEN or not barcode:
-        return None
-    try:
-        url = f"{TRADEPEG_BASE_URL}/inventory/lookup"
-        headers = {"Authorization": f"Bearer {TRADEPEG_TOKEN}", "Accept": "application/json"}
-        r = requests.get(url, headers=headers, params={"query": barcode}, timeout=10)
-        r.raise_for_status()
-        data = r.json().get("data", [])
-        if not data:
-            return None
-        item = data[0]
-        return {"sku": item.get("sku"), "title": item.get("title")}
-    except Exception as e:
-        log_event("tradepeg.error", error=str(e))
-        return None
+# Direct TradePeg API access is intentionally disabled.
+# This kiosk only talks to the Farla Railway API endpoints configured above.
 
 # ----------------------------
 # Barcode buffer (keyboard scanner)
@@ -891,9 +878,9 @@ class Uploader(threading.Thread):
 # ----------------------------
 # Fast CSV product catalogue + search helpers
 # ----------------------------
-TRADEPEG_EXPORT_PRODUCTS_URL = os.getenv("TRADEPEG_EXPORT_PRODUCTS_URL", "https://farlatradepegapi-production.up.railway.app/export/product/")
-PRODUCT_CACHE_PATH = Path(os.getenv("PRODUCT_CACHE_PATH", APP_DIR / "tradepeg_products.csv"))
-PRODUCT_CACHE_REFRESH_SECONDS = int(os.getenv("TRADEPEG_CACHE_REFRESH_SECONDS", "21600"))
+TRADEPEG_EXPORT_PRODUCTS_URL = f"{TRADEPEG_API_BASE}/export/product/"
+PRODUCT_CACHE_PATH = APP_DIR / "tradepeg_products.csv"
+PRODUCT_CACHE_REFRESH_SECONDS = 21600
 NEON = "#b6ff00"
 CARD_BG_2 = "#242424"
 CARD_BG_3 = "#303030"
