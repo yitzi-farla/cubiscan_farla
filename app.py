@@ -1694,6 +1694,20 @@ class App:
         if self.mode in ("uom", "ready") and u in (UOM_UNIT_CODE, UOM_PACK_CODE, UOM_CASE_CODE):
             self._choose_uom({UOM_UNIT_CODE: "Unit", UOM_PACK_CODE: "Pack", UOM_CASE_CODE: "Case"}[u]); return
 
+        if self.mode == "ready" and self.selected_row and likely_numeric_barcode(code):
+            self.raw_scan_for_submit = code
+            self.normalized_barcode = canonical_1d_barcode(code)
+            self.product_barcode = self.normalized_barcode
+            self._set_search_text(code)
+            self.toast.show("Barcode attached", color=NEON)
+            log_event(
+                "barcode.attached",
+                barcode=self.normalized_barcode,
+                sku=self.selected_product,
+                uom=normalize_uom_name(self.selected_row.get("UOM Name")),
+            )
+            return
+
         self._set_search_text(code)
         log_event("barcode.scanned", barcode=code)
         row, one_d = self.uom_cache.lookup_barcode(code)
