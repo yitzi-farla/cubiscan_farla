@@ -29,7 +29,7 @@ DB_URL = os.getenv("DATABASE_URL", "")
 TABLE_NAME = "measurements"
 
 # Command barcodes
-SUBMIT_TO_DB_CODE = "SUBMITTODB"
+SUBMIT_TO_DB_CODE = "SUBMIT"
 CLEAR_CODE        = "CLEARFROMSCREEN"
 UOM_UNIT_CODE     = "UNIT"
 UOM_PACK_CODE     = "PACK"
@@ -839,8 +839,10 @@ class Uploader(threading.Thread):
         self.conn = None
         self.notify = notify
 
-    def _notify(self, message, color=NEON):
+    def _notify(self, message, color=None):
         try:
+            if color is None:
+                color = "#b6ff00"
             if self.notify:
                 self.notify(message, color)
         except Exception:
@@ -858,12 +860,12 @@ class Uploader(threading.Thread):
                 sku = clean_cell(first_row.get("identifier"))
                 uom = clean_cell(first_row.get("uomName"))
                 label = " / ".join([x for x in (sku, uom) if x])
-                self._notify(f"Uploading to TradePeg{(': ' + label) if label else ''}...", color=NEON)
+                self._notify(f"Uploading to TradePeg{(': ' + label) if label else ''}...", color="#b6ff00")
 
                 # First update TradePeg, then record locally. The item is removed only after both configured sinks succeed.
                 if item.get("tradepeg_payload"):
                     tradepeg_push_uom(item["tradepeg_payload"])
-                    self._notify("Submitted to TradePeg", color=NEON)
+                    self._notify("Submitted to TradePeg", color="#b6ff00")
 
                 db_payload = item.get("db_payload", item)
                 inserted_id = None
@@ -877,14 +879,14 @@ class Uploader(threading.Thread):
                         row = cur.fetchone()
                         inserted_id = row["id"]
                     log_event("db.insert.ok", id=inserted_id)
-                    self._notify("Saved to database", color=NEON)
+                    self._notify("Saved to database", color="#b6ff00")
 
                 remaining = pool_drop_first()
                 log_event("upload.complete", db_id=inserted_id, remaining=remaining)
-                self._notify("Upload complete", color=NEON)
+                self._notify("Upload complete", color="#b6ff00")
             except Exception as e:
                 log_event("upload.fail", error=str(e))
-                self._notify("Upload failed - will retry", color=ERROR)
+                self._notify("Upload failed - will retry", color="#ef4444")
                 try:
                     if self.conn: self.conn.close()
                 except Exception:
