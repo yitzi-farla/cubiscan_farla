@@ -29,7 +29,7 @@ DB_URL = os.getenv("DATABASE_URL", "")
 TABLE_NAME = "measurements"
 
 # Command barcodes
-SUBMIT_TO_DB_CODE = "SUBMIT"
+SUBMIT_TO_DB_CODE = "SUBMITTODB"
 CLEAR_CODE        = "CLEARFROMSCREEN"
 UOM_UNIT_CODE     = "UNIT"
 UOM_PACK_CODE     = "PACK"
@@ -51,6 +51,7 @@ EVT_LOG  = LOG_DIR / "events.jsonl"          # append-only JSONL
 RAW_LOG  = LOG_DIR / "raw_device.jsonl"      # raw device frames (optional)
 POOL_PATH= LOG_DIR / "pending_pool.json"     # offline queue
 UOM_CACHE_PATH = APP_DIR / "tradepeg_uom.csv"
+UOM_CACHE_REFRESH_SECONDS = 21600
 CACHE_DB_PATH = APP_DIR / "tradepeg_cache.sqlite"
 
 # ----------------------------
@@ -238,9 +239,14 @@ class UomCache:
         )
 
     def ensure_downloaded(self, force=False):
-        if not force and self.path.exists() and self.path.stat().st_size > 0:
+        stale = False
+        if self.path.exists() and self.path.stat().st_size > 0:
+            stale = (time.time() - self.path.stat().st_mtime) > UOM_CACHE_REFRESH_SECONDS
+        if not force and self.path.exists() and self.path.stat().st_size > 0 and not stale:
             cache_progress(f"Using UOM cache: {self.path}")
             return
+        if stale and not force:
+            cache_progress("UOM cache is stale; refreshing from TradePeg")
         if not TRADEPEG_API_KEY:
             cache_progress("UOM cache missing/failed, but TRADEPEG_API_KEY is not set; cannot download /export/uom")
             if self.path.exists() and self.path.stat().st_size > 0:
@@ -827,10 +833,18 @@ class BarcodeBuffer:
 # Background uploader
 # ----------------------------
 class Uploader(threading.Thread):
-    def __init__(self):
+    def __init__(self, notify=None):
         super().__init__(daemon=True)
         self._stop = threading.Event()
         self.conn = None
+        self.notify = notify
+
+    def _notify(self, message, color=NEON):
+        try:
+            if self.notify:
+                self.notify(message, color)
+        except Exception:
+            pass
 
     def run(self):
         while not self._stop.is_set():
@@ -840,9 +854,16 @@ class Uploader(threading.Thread):
                 continue
 
             try:
+                first_row = tradepeg_row_summary(item.get("tradepeg_payload") or {})
+                sku = clean_cell(first_row.get("identifier"))
+                uom = clean_cell(first_row.get("uomName"))
+                label = " / ".join([x for x in (sku, uom) if x])
+                self._notify(f"Uploading to TradePeg{(': ' + label) if label else ''}...", color=NEON)
+
                 # First update TradePeg, then record locally. The item is removed only after both configured sinks succeed.
                 if item.get("tradepeg_payload"):
                     tradepeg_push_uom(item["tradepeg_payload"])
+                    self._notify("Submitted to TradePeg", color=NEON)
 
                 db_payload = item.get("db_payload", item)
                 inserted_id = None
@@ -856,10 +877,14 @@ class Uploader(threading.Thread):
                         row = cur.fetchone()
                         inserted_id = row["id"]
                     log_event("db.insert.ok", id=inserted_id)
+                    self._notify("Saved to database", color=NEON)
+
                 remaining = pool_drop_first()
                 log_event("upload.complete", db_id=inserted_id, remaining=remaining)
+                self._notify("Upload complete", color=NEON)
             except Exception as e:
                 log_event("upload.fail", error=str(e))
+                self._notify("Upload failed - will retry", color=ERROR)
                 try:
                     if self.conn: self.conn.close()
                 except Exception:
@@ -1207,11 +1232,21 @@ def make_synthetic_uom_row(product, uom_name, base_rows=None):
 
 
 def payload_barcode_for(row, scanned_barcode):
+    """
+    For lookup we are tolerant of missing/extra leading zeroes, but for submission
+    preserve the exact scanned 1D barcode. For GS1/2D scans, submit the extracted GTIN.
+    """
+    raw_scanned = clean_cell(scanned_barcode)
+    gtin = _gs1_gtin(raw_scanned)
+    if gtin:
+        return gtin
+    digits = re.sub(r"\D+", "", raw_scanned)
+    if digits and likely_numeric_barcode(raw_scanned):
+        return digits
     existing = canonical_1d_barcode(row.get("UOM EAN"))
     if existing and existing.isdigit():
         return existing
-    scanned = canonical_1d_barcode(scanned_barcode)
-    return scanned if likely_numeric_barcode(scanned_barcode) and scanned.isdigit() else ""
+    return ""
 
 
 def build_tradepeg_uom_payload(row, barcode, dims):
@@ -1426,12 +1461,16 @@ class App:
         self.uom_cache = UomCache(UOM_CACHE_PATH)
         self.product_cache = ProductCatalogCache()
         threading.Thread(target=self._load_caches, daemon=True).start()
-        self.uploader = Uploader(); self.uploader.start()
+        threading.Thread(target=self._periodic_cache_refresh, daemon=True).start()
+        self.uploader = Uploader(notify=self.notify_user); self.uploader.start()
         self.reader = SerialReader(PORT, BAUD, self.q); self.reader.start()
         self.bb = BarcodeBuffer(); root.bind("<Key>", self.on_key)
         root.after(70, self.poll_serial)
         self._set_search_text("")
         log_event("ui.start", port=PORT, baud=BAUD, submit=SUBMIT_TO_DB_CODE, clear=CLEAR_CODE)
+
+    def notify_user(self, message, color=NEON):
+        self.root.after(0, lambda: self.toast.show(message, color=color))
 
     def _fmt(self, v, n=0):
         return f"{v:.{n}f}" if (v is not None and isinstance(v, (int, float))) else None
@@ -1464,6 +1503,22 @@ class App:
                 cache_progress(f"Full cache redownload failed: {e2}")
                 log_event("cache.redownload_error", error=str(e2), traceback=traceback.format_exc())
                 self.root.after(0, lambda: self.toast.show("TradePeg data download failed - check API key/network", color=ERROR))
+
+    def _periodic_cache_refresh(self):
+        # Refresh TradePeg UOM and product exports every 6 hours while the kiosk is running.
+        while True:
+            time.sleep(21600)
+            try:
+                cache_progress("Scheduled TradePeg cache refresh starting")
+                self.root.after(0, lambda: self.toast.show("Refreshing TradePeg data...", color=NEON))
+                self.uom_cache.refresh(force=True)
+                self.product_cache.load(force=True)
+                cache_progress("Scheduled TradePeg cache refresh complete")
+                self.root.after(0, lambda: self.toast.show("TradePeg data refreshed", color=NEON))
+            except Exception as e:
+                cache_progress(f"Scheduled TradePeg cache refresh failed: {e}")
+                log_event("cache.scheduled_refresh_failed", error=str(e), traceback=traceback.format_exc())
+                self.root.after(0, lambda: self.toast.show("TradePeg refresh failed - using cached data", color=WARN))
 
     def _set_search_text(self, text):
         raw = clean_cell(text)
@@ -1755,7 +1810,7 @@ class App:
         }
         tradepeg_payload = build_tradepeg_uom_payload(self.selected_row, self.raw_scan_for_submit, d)
         pool_enqueue({"db_payload": db_payload, "tradepeg_payload": tradepeg_payload})
-        self.toast.show("Queued TradePeg update", color=NEON)
+        self.toast.show("Queued - uploading in background", color=NEON)
         first_row = tradepeg_row_summary(tradepeg_payload)
         log_event(
             "submit.enqueued",
