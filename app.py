@@ -1350,7 +1350,12 @@ class UomCard(tk.Frame):
         tk.Label(body, text=" • ".join([x for x in (brand, title) if x]) or "No title/brand in product export", bg=bg, fg=subfg, font=("Inter", 13), wraplength=420, justify="left", anchor="w").grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6,0))
         state = "Existing UOM" if exists else "New UOM will be created"
         tk.Label(body, text=state, bg="#101010" if focused else ("#1e1e1e" if exists else "#3a2d12"), fg=NEON if focused else (SOFT_TXT if exists else WARN), font=("Inter", 12, "bold"), padx=10, pady=8, anchor="w").grid(row=3, column=0, columnspan=2, sticky="ew", pady=(16,0))
-        details = f"UOM SKU: {clean_cell(row.get('UOM SKU')) or '-'}\nBarcode in TradePeg: {canonical_1d_barcode(row.get('UOM EAN')) or '-'}"
+        shelf_qty = get_uom_qty(row, uom_name)
+        details = (
+            f"Shelf Qty: {shelf_qty or '-'}\n"
+            f"UOM SKU: {clean_cell(row.get('UOM SKU')) or '-'}\n"
+            f"Barcode in TradePeg: {canonical_1d_barcode(row.get('UOM EAN')) or '-'}"
+        )
         tk.Label(body, text=details, bg=bg, fg=subfg, font=("Inter", 12, "bold"), justify="left", anchor="w").grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10,0))
 
 
